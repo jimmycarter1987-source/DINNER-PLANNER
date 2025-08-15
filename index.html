@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Dinner Planner</title>
+  <meta name="theme-color" content="#0f172a" />
+
+  <!-- iOS PWA bits -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 UMD -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for in-browser JSX transform -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* Safe area padding for iOS in standalone mode */
+    @supports(padding: max(0px)) {
+      body { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+    }
+  </style>
+</head>
+<body class="bg-slate-50">
+  <!-- Install banner (shown on Chrome/Android when beforeinstallprompt fires) -->
+  <div id="installBanner" class="hidden fixed inset-x-0 bottom-0 z-50 bg-slate-900 text-white p-4 shadow-2xl">
+    <div class="max-w-3xl mx-auto flex items-center justify-between gap-3">
+      <div class="text-sm">Install <strong>Family Dinner Planner</strong> on your device?</div>
+      <div class="flex gap-2">
+        <button id="installNow" class="px-3 py-2 rounded-lg bg-white text-slate-900">Install</button>
+        <button id="dismissInstall" class="px-3 py-2 rounded-lg border border-white/30">Not now</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="root"></div>
+
+  <script>
+    // Register the service worker (HTTPS or localhost only)
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js");
+      });
+    }
+
+    // Handle A2HS prompt
+    let deferredPrompt = null;
+    window.addEventListener("beforeinstallprompt", (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      const banner = document.getElementById("installBanner");
+      banner?.classList.remove("hidden");
+    });
+    document.getElementById("installNow")?.addEventListener("click", async () => {
+      const banner = document.getElementById("installBanner");
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      await deferredPrompt.userChoice;
+      banner?.classList.add("hidden");
+      deferredPrompt = null;
+    });
+    document.getElementById("dismissInstall")?.addEventListener("click", () => {
+      document.getElementById("installBanner")?.classList.add("hidden");
+      deferredPrompt = null;
+    });
+  </script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useMemo, useState, useEffect } = React;
+
+    // ---- same app as the one we built ----
+
+    const uid = () => Math.random().toString(36).slice(2, 10);
+
+    const DEFAULT_RECIPES = [
+      {
+        id: uid(),
+        title: "Sheet‑Pan Chicken & Veg",
+        cuisine: "American",
+        tags: ["easy", "one‑pan"],
+        servings: 4,
+        ingredients: [
+          { name: "chicken thighs", unit: "lb", qtyPerServing: 0.25 },
+          { name: "broccoli florets", unit: "cup", qtyPerServing: 0.5 },
+          { name: "carrots", unit: "cup", qtyPerServing: 0.25 },
+          { name: "olive oil", unit: "tbsp", qtyPerServing: 0.5 },
+          { name: "salt", unit: "tsp", qtyPerServing: 0.25 },
+          { name: "pepper", unit: "tsp", qtyPerServing: 0.125 },
+        ],
+        notes: "Roast at 425°F 25–30 min.",
+      },
+      {
+        id: uid(),
+        title: "Spaghetti Bolognese",
+        cuisine: "Italian",
+        tags: ["pasta"],
+        servings: 4,
+        ingredients: [
+          { name: "spaghetti", unit: "oz", qtyPerServing: 2 },
+          { name: "ground beef", unit: "lb", qtyPerServing: 0.25 },
+          { name: "tomato sauce", unit: "cup", qtyPerServing: 0.5 },
+          { name: "onion", unit: "cup", qtyPerServing: 0.25 },
+          { name: "garlic", unit: "clove", qtyPerServing: 0.5 },
+        ],
+      },
+      {
+        id: uid(),
+        title: "Taco Night",
+        cuisine: "Mexican",
+        tags: ["crowd‑pleaser"],
+        servings: 4,
+        ingredients: [
+          { name: "corn tortillas", unit: "pcs", qtyPerServing: 3 },
+          { name: "ground turkey", unit: "lb", qtyPerServing: 0.25 },
+          { name: "lettuce", unit: "cup", qtyPerServing: 0.25 },
+          { name: "tomato", unit: "cup", qtyPerServing: 0.25 },
+          { name: "cheddar", unit: "oz", qtyPerServing: 1 },
+        ],
+      },
+      {
+        id: uid(),
+        title: "Stir‑Fry Veg & Tofu",
+        cuisine: "Asian",
+        tags: ["meatless", "weeknight"],
+        servings: 4,
+        ingredients: [
+          { name: "extra‑firm tofu", unit: "oz", qtyPerServing: 3 },
+          { name: "mixed vegetables", unit: "cup", qtyPerServing: 1 },
+          { name: "soy sauce", unit: "tbsp", qtyPerServing: 0.5 },
+          { name: "rice", unit: "cup", qtyPerServing: 0.5 },
+        ],
+      },
+      {
+        id: uid(),
+        title: "Salmon, Rice & Greens",
+        cuisine: "American",
+        tags: ["omega‑3"],
+        servings: 4,
+        ingredients: [
+          { name: "salmon fillet", unit: "lb", qtyPerServing: 0.25 },
+          { name: "rice", unit: "cup", qtyPerServing: 0.5 },
+          { name: "spinach", unit: "cup", qtyPerServing: 0.5 },
+          { name: "lemon", unit: "pcs", qtyPerServing: 0.25 },
+        ],
+      },
+      {
+        id: uid(),
+        title: "Curry Chickpeas",
+        cuisine: "Indian",
+        tags: ["meatless", "pantry"],
+        servings: 4,
+        ingredients: [
+          { name: "canned chickpeas", unit: "can", qtyPerServing: 0.5 },
+          { name: "coconut milk", unit: "cup", qtyPerServing: 0.25 },
+          { name: "curry paste", unit: "tbsp", qtyPerServing: 0.5 },
+          { name: "rice", unit: "cup", qtyPerServing: 0.5 },
+        ],
+      },
+    ];
+
+    const loadLS = (key, fallback) => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch {
+        return fallback;
+      }
+    };
+    const saveLS = (key, data) => {
+      try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
+    };
+
+    function generatePlan(recipes, days = 21) {
+      const items = [];
+      const ids = recipes.map(r => r.id);
+      if (ids.length === 0) return Array.from({ length: days }, (_, i) => ({ dayIndex: i, recipeId: null }));
+
+      const shuffled = [...ids].sort(() => Math.random() - 0.5);
+      const lastUsed = new Map();
+      let ptr = 0;
+
+      for (let d = 0; d < days; d++) {
+        let chosen = null;
+        for (let tries = 0; tries < ids.length; tries++) {
+          const id = shuffled[(ptr + tries) % ids.length];
+          const last = lastUsed.get(id);
+          if (last == null || d - last >= 21) { chosen = id; ptr = (ptr + tries + 1) % ids.length; break; }
+        }
+        if (!chosen) {
+          let best = null; let bestGap = -Infinity;
+          ids.forEach(id => { const gap = d - (lastUsed.get(id) ?? -9999); if (gap > bestGap) { bestGap = gap; best = id; } });
+          chosen = best;
+        }
+        lastUsed.set(chosen, d);
+        items.push({ dayIndex: d, recipeId: chosen });
+      }
+      return items;
+    }
+
+    function aggregateIngredients(plan, recipesById, familySize, range = { start: 0, end: 20 }) {
+      const map = new Map();
+      for (let d = range.start; d <= range.end; d++) {
+        const item = plan.find(p => p.dayIndex === d);
+        if (!item || !item.recipeId) continue;
+        const recipe = recipesById[item.recipeId];
+        if (!recipe) continue;
+        const scale = familySize / (recipe.servings || 1);
+        for (const ing of recipe.ingredients) {
+          const key = `${ing.name.toLowerCase()}|${ing.unit}`;
+          const current = map.get(key) || 0;
+          map.set(key, current + (Number(ing.qtyPerServing) * scale));
+        }
+      }
+      const list = Array.from(map.entries()).map(([key, total]) => {
+        const [name, unit] = key.split("|");
+        return { name, unit, total: roundSmart(total) };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+      return list;
+    }
+
+    function roundSmart(n) {
+      if (!isFinite(n)) return 0;
+      const fixed = Math.round(n * 100) / 100;
+      return Number(fixed.toString());
+    }
+
+    function toCSV(rows) {
+      const header = ["Item", "Total", "Unit"]; 
+      const lines = [header.join(",")];
+      rows.forEach(r => lines.push([escapeCSV(r.name), r.total, escapeCSV(r.unit)].join(",")));
+      return lines.join("\n");
+    }
+
+    function escapeCSV(s = "") { return '"' + String(s).replaceAll('"', '""') + '"'; }
+
+    function App() {
+      const [familySize, setFamilySize] = React.useState(() => loadLS("fdp.familySize", 4));
+      const [recipes, setRecipes] = React.useState(() => loadLS("fdp.recipes", DEFAULT_RECIPES));
+      const [plan, setPlan] = React.useState(() => loadLS("fdp.plan", generatePlan(loadLS("fdp.recipes", DEFAULT_RECIPES))));
+      const [activeTab, setActiveTab] = React.useState("planner");
+      const [selectedWeek, setSelectedWeek] = React.useState(0);
+
+      React.useEffect(() => saveLS("fdp.familySize", familySize), [familySize]);
+      React.useEffect(() => saveLS("fdp.recipes", recipes), [recipes]);
+      React.useEffect(() => saveLS("fdp.plan", plan), [plan]);
+
+      const recipesById = React.useMemo(() => Object.fromEntries(recipes.map(r => [r.id, r])), [recipes]);
+
+      const weekRanges = [
+        { label: "Week 1 (Days 1–7)", start: 0, end: 6 },
+        { label: "Week 2 (Days 8–14)", start: 7, end: 13 },
+        { label: "Week 3 (Days 15–21)", start: 14, end: 20 },
+        { label: "All 3 Weeks", start: 0, end: 20 },
+      ];
+      const range = weekRanges[selectedWeek];
+      const shopping = React.useMemo(() => aggregateIngredients(plan, recipesById, Number(familySize), range), [plan, recipesById, familySize, selectedWeek]);
+      const cooldownWarning = recipes.length < 21;
+
+      return (
+        <div className="min-h-screen w-full bg-slate-50 text-slate-900 p-6">
+          <div className="max-w-6xl mx-auto">
+            <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between mb-6">
+              <div>
+                <h1 className="text-3xl font-bold">Family Dinner Planner</h1>
+                <p className="text-slate-600">3‑week variety • aggregated shopping list • offline capable</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <label className="text-sm">Family Size (servings/meal)</label>
+                <input type="number" min={1} value={familySize} onChange={e => setFamilySize(Number(e.target.value) || 1)} className="border rounded-xl px-3 py-2 w-24 shadow-sm"/>
+                <button onClick={() => { setPlan(generatePlan(recipes)); setActiveTab("planner"); }} className="px-4 py-2 rounded-xl bg-slate-900 text-white shadow">Generate 3‑Week Plan</button>
+              </div>
+            </header>
+
+            {cooldownWarning && (
+              <div className="mb-4 p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                <strong>Tip:</strong> You currently have {recipes.length} recipes. Add at least {21 - recipes.length} more to avoid repeats within 3 weeks.
+              </div>
+            )}
+
+            <nav className="flex gap-2 mb-6 flex-wrap">
+              {[
+                { id: "planner", label: "Planner" },
+                { id: "shopping", label: "Shopping List" },
+                { id: "recipes", label: "Recipes" },
+                { id: "import", label: "Import/Export" },
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-4 py-2 rounded-xl border shadow-sm ${activeTab===tab.id?"bg-white":"bg-slate-100"}`}>{tab.label}</button>
+              ))}
+            </nav>
+
+            {activeTab === "planner" && (
+              <Planner plan={plan} setPlan={setPlan} recipesById={recipesById} recipes={recipes} />
+            )}
+
+            {activeTab === "shopping" && (
+              <ShoppingList
+                weekRanges={weekRanges}
+                selectedWeek={selectedWeek}
+                setSelectedWeek={setSelectedWeek}
+                shopping={shopping}
+              />
+            )}
+
+            {activeTab === "recipes" && (
+              <RecipeManager recipes={recipes} setRecipes={setRecipes} />
+            )}
+
+            {activeTab === "import" && (
+              <ImportExport recipes={recipes} setRecipes={setRecipes} />
+            )}
+
+            <footer className="mt-10 text-xs text-slate-500">Installable PWA — works offline after the first load.</footer>
+          </div>
+        </div>
+      );
+    }
+
+    function Planner({ plan, setPlan, recipesById, recipes }) {
+      const setRecipeForDay = (dayIndex, recipeId) => {
+        const next = plan.map(p => p.dayIndex === dayIndex ? { ...p, recipeId } : p);
+        setPlan(next);
+      };
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {Array.from({ length: 21 }).map((_, i) => {
+            const item = plan.find(p => p.dayIndex === i) || { recipeId: null };
+            const recipe = item.recipeId ? recipesById[item.recipeId] : null;
+            return (
+              <div key={i} className="bg-white rounded-2xl shadow p-4 border">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-semibold">Day {i + 1}</h3>
+                  {recipe && <span className="text-xs px-2 py-1 rounded-full bg-slate-100 border">{recipe.cuisine || "—"}</span>}
+                </div>
+                <select value={item.recipeId || ""} onChange={e => setRecipeForDay(i, e.target.value || null)} className="w-full border rounded-xl p-2">
+                  <option value="">— Select recipe —</option>
+                  {recipes.map(r => (
+                    <option key={r.id} value={r.id}>{r.title}</option>
+                  ))}
+                </select>
+                {recipe && (
+                  <div className="mt-3 text-sm text-slate-600">
+                    <div className="font-medium">{recipe.title}</div>
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {(recipe.tags||[]).map(t => <span key={t} className="text-xs px-2 py-0.5 rounded-full bg-slate-100 border">{t}</span>)}
+                    </div>
+                    {recipe.notes && <div className="mt-2 text-xs italic">{recipe.notes}</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function ShoppingList({ weekRanges, selectedWeek, setSelectedWeek, shopping }) {
+      const downloadCSV = () => {
+        const csv = toCSV(shopping);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `shopping-list-week-${selectedWeek+1}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+
+      const printList = () => {
+        const w = window.open("", "_blank", "width=600,height=800");
+        if (!w) return;
+        w.document.write(`<html><head><title>Shopping List</title></head><body>`);
+        w.document.write(`<h2>Shopping List</h2>`);
+        w.document.write(`<ul>` + shopping.map(i => `<li>${i.name} — <strong>${i.total}</strong> ${i.unit}</li>`).join("") + `</ul>`);
+        w.document.write(`</body></html>`);
+        w.document.close();
+        w.focus();
+        w.print();
+      };
+
+      return (
+        <div className="bg-white rounded-2xl shadow p-4 border">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-xl font-semibold">Shopping List</h2>
+              <p className="text-slate-600 text-sm">Aggregated by your current plan and family size.</p>
+            </div>
+            <div className="flex gap-2 items-center">
+              <select value={selectedWeek} onChange={e => setSelectedWeek(Number(e.target.value))} className="border rounded-xl p-2">
+                {weekRanges.map((w, idx) => (
+                  <option key={idx} value={idx}>{w.label}</option>
+                ))}
+              </select>
+              <button onClick={downloadCSV} className="px-3 py-2 rounded-xl border shadow-sm bg-slate-900 text-white">Export CSV</button>
+              <button onClick={printList} className="px-3 py-2 rounded-xl border shadow-sm">Print</button>
+            </div>
+          </div>
+
+          {shopping.length === 0 ? (
+            <div className="text-slate-600">No items yet — generate a plan and/or select a week.</div>
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b">
+                  <th className="py-2">Item</th>
+                  <th className="py-2">Total</th>
+                  <th className="py-2">Unit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shopping.map((i, idx) => (
+                  <tr key={idx} className="border-b last:border-0">
+                    <td className="py-2 font-medium">{i.name}</td>
+                    <td className="py-2">{i.total}</td>
+                    <td className="py-2">{i.unit}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      );
+    }
+
+    function RecipeManager({ recipes, setRecipes }) {
+      const [filter, setFilter] = React.useState("");
+      const [editing, setEditing] = React.useState(null);
+      const filtered = recipes.filter(r => r.title.toLowerCase().includes(filter.toLowerCase()) || (r.cuisine||"").toLowerCase().includes(filter.toLowerCase()) || (r.tags||[]).some(t => t.toLowerCase().includes(filter.toLowerCase())));
+
+      const startNew = () => setEditing({ id: "new" });
+
+      return (
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="md:col-span-2 bg-white rounded-2xl shadow p-4 border">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xl font-semibold">Recipes</h2>
+              <div className="flex gap-2 items-center">
+                <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search title, cuisine, tags…" className="border rounded-xl p-2 w-56"/>
+                <button onClick={startNew} className="px-3 py-2 rounded-xl border shadow-sm bg-slate-900 text-white">Add Recipe</button>
+              </div>
+            </div>
+            <ul className="divide-y">
+              {filtered.map(r => (
+                <li key={r.id} className="py-3 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-medium">{r.title}</div>
+                    <div className="text-xs text-slate-600">{r.cuisine || "—"} • {r.servings} servings • {(r.tags||[]).join(", ")}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditing(r)} className="px-3 py-1.5 rounded-xl border shadow-sm">Edit</button>
+                    <button onClick={() => setRecipes(recipes.filter(x => x.id !== r.id))} className="px-3 py-1.5 rounded-xl border shadow-sm text-red-600">Delete</button>
+                  </div>
+                </li>
+              ))}
+              {filtered.length === 0 && (
+                <li className="py-6 text-slate-600">No matches.</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow p-4 border">
+            <h3 className="font-semibold mb-3">{editing ? (editing.id === "new" ? "New Recipe" : "Edit Recipe") : "Details"}</h3>
+            {editing ? (
+              <RecipeForm
+                key={editing.id === "new" ? "new" : editing.id}
+                initial={editing.id === "new" ? null : editing}
+                onCancel={() => setEditing(null)}
+                onSave={(rec) => {
+                  if (editing.id === "new") {
+                    setRecipes([{ ...rec, id: uid() }, ...recipes]);
+                  } else {
+                    setRecipes(recipes.map(r => r.id === rec.id ? rec : r));
+                  }
+                  setEditing(null);
+                }}
+              />
+            ) : (
+              <p className="text-sm text-slate-600">Select a recipe to edit, or click <em>Add Recipe</em>.</p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function RecipeForm({ initial, onSave, onCancel }) {
+      const [title, setTitle] = React.useState(initial?.title || "");
+      const [cuisine, setCuisine] = React.useState(initial?.cuisine || "");
+      const [tags, setTags] = React.useState((initial?.tags || []).join(", "));
+      const [servings, setServings] = React.useState(initial?.servings || 4);
+      const [notes, setNotes] = React.useState(initial?.notes || "");
+      const [ingredients, setIngredients] = React.useState(initial?.ingredients || [ { name: "", unit: "", qtyPerServing: 1 } ]);
+
+      const addIng = () => setIngredients([...ingredients, { name: "", unit: "", qtyPerServing: 1 }]);
+      const removeIng = (idx) => setIngredients(ingredients.filter((_, i) => i !== idx));
+      const updateIng = (idx, patch) => setIngredients(ingredients.map((ing, i) => i === idx ? { ...ing, ...patch } : ing));
+
+      const save = () => {
+        const rec = {
+          id: initial?.id || uid(),
+          title: title.trim() || "Untitled",
+          cuisine: cuisine.trim() || undefined,
+          tags: tags.split(",").map(s => s.trim()).filter(Boolean),
+          servings: Number(servings) || 1,
+          notes: notes.trim() || undefined,
+          ingredients: ingredients.filter(i => i.name.trim()).map(i => ({ name: i.name.trim(), unit: i.unit.trim(), qtyPerServing: Number(i.qtyPerServing) || 0 }))
+        };
+        onSave(rec);
+      };
+
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="text-sm">Title</label>
+          <input value={title} onChange={e => setTitle(e.target.value)} className="border rounded-xl p-2"/>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-sm">Cuisine</label>
+              <input value={cuisine} onChange={e => setCuisine(e.target.value)} className="border rounded-xl p-2 w-full"/>
+            </div>
+            <div>
+              <label className="text-sm">Tags (comma‑separated)</label>
+              <input value={tags} onChange={e => setTags(e.target.value)} className="border rounded-xl p-2 w-full"/>
+            </div>
+          </div>
+
+          <label className="text-sm">Recipe yields (default servings)</label>
+          <input type="number" min={1} value={servings} onChange={e => setServings(Number(e.target.value) || 1)} className="border rounded-xl p-2 w-28"/>
+
+          <div className="mt-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Ingredients (per serving)</label>
+              <button onClick={addIng} className="px-2 py-1 rounded-lg border shadow-sm">Add</button>
+            </div>
+            <div className="mt-2 flex flex-col gap-2">
+              {ingredients.map((ing, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                  <input placeholder="item" value={ing.name} onChange={e => updateIng(idx, { name: e.target.value })} className="col-span-5 border rounded-xl p-2"/>
+                  <input placeholder="unit" value={ing.unit} onChange={e => updateIng(idx, { unit: e.target.value })} className="col-span-2 border rounded-xl p-2"/>
+                  <input type="number" step="0.01" placeholder="qty / serving" value={ing.qtyPerServing} onChange={e => updateIng(idx, { qtyPerServing: Number(e.target.value) })} className="col-span-3 border rounded-xl p-2"/>
+                  <button onClick={() => removeIng(idx)} className="col-span-2 px-3 py-2 rounded-xl border shadow-sm text-red-600">Remove</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <label className="text-sm">Notes</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} className="border rounded-xl p-2 min-h-[80px]"/>
+
+          <div className="flex gap-2 mt-2">
+            <button onClick={save} className="px-3 py-2 rounded-xl border shadow-sm bg-slate-900 text-white">Save</button>
+            <button onClick={onCancel} className="px-3 py-2 rounded-xl border shadow-sm">Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
